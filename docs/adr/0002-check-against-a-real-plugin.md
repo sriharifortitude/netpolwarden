@@ -15,8 +15,9 @@ words. It does not check it against what a cluster does.
 run agnhost and policies that cover the hard cases (AND against OR, named ports that exist and
 do not, egress isolation, cross-namespace selectors, a default deny), and tries every pod to
 pod connection on every declared port with `agnhost connect`. For each one, `netpolwarden
---can` must give the same answer. It runs in CI. The machine this was written on keeps
-Docker's storage off limits, so the first run of the check is the first CI run.
+--can` must give the same answer. It runs in CI, because the machine this was written on
+keeps Docker's storage off limits. On the first run, against Calico 3.28.2, all 20 connections
+agreed.
 
 ## Consequences
 

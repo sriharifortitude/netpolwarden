@@ -54,7 +54,7 @@ egress lockdown also stops it calling the controller, and it blocks the database
 ## Usage
 
 ```bash
-go install github.com/sriharifortitude/netpolwarden/cmd/netpolwarden@v0.1.0
+go install github.com/sriharifortitude/netpolwarden/cmd/netpolwarden@v0.1.1
 
 netpolwarden manifests/                               # findings
 netpolwarden manifests/ --can "shop/frontend shop/db 5432"
@@ -104,14 +104,19 @@ They use the documentation's example policy and the behaviour it states for it (
 in which namespaces reach the database, and on which port), its side-by-side contrast between
 one peer with two selectors and two peers, and its default-policy recipes. All of them pass.
 
-**Against a real plugin: written, not yet run.** `scripts/differential.sh` creates a kind
-cluster with Calico 3.28, applies `testdata/differential/cluster.yaml` (five agnhost pods in
-two namespaces, and policies for AND against OR, named ports that exist and do not, egress
-isolation, cross-namespace selectors and a default deny), opens a real TCP connection for
-every pair of pods on every declared port, and requires `netpolwarden --can` to give the same
-answer for each. Docker's storage on the machine this was built on is off limits, so this runs
-for the first time in CI. Until it passes there, treat the evaluator as agreeing with the
-documentation, not yet with a cluster. [ADR 2](docs/adr/0002-check-against-a-real-plugin.md).
+**Against a real plugin.** `scripts/differential.sh` creates a kind cluster with Calico 3.28
+and applies `testdata/differential/cluster.yaml`: five agnhost pods in two namespaces, with
+policies for AND against OR, named ports that exist and do not, egress isolation,
+cross-namespace selectors and a default deny. It then opens a real TCP connection for every
+pair of pods on every declared port, and requires `netpolwarden --can` to give the same answer
+for each. It runs in CI. On the first run, all 20 connections agreed with Calico.
+[ADR 2](docs/adr/0002-check-against-a-real-plugin.md).
+
+**Security review.** An automated review of the first commits found three places where the
+loader read a manifest differently from the API server. A null `egress:` section, or an alias
+of one, made a policy look like an egress policy. And a Namespace manifest could set
+`kubernetes.io/metadata.name` to another namespace's name, which the API server always
+overwrites. All three are fixed and tested in v0.1.1.
 
 **Mutation testing.** I broke the code in 50 places on purpose. On the first run, 12 mutants survived and 2 did not compile; I rewrote those so they do, and two of the survivors changed nothing a caller can observe, so I dropped them. The rest found one bug and several gaps. The bug: a policy with `ingress: []` and `egress: []` was not reported as denying everything, because the check looked for a missing section rather than an empty one, though the API treats the two alike. The gaps: no test separated a missing label from a label with an empty value (in matchLabels, In, NotIn and Exists); none used a named port with the other protocol; none let DNS through a port range, or through a rule with no ports, when the DNS server is not in the manifests; none had a podSelector that matched only in another namespace; and none checked the matrix's "every workload, and outside the cluster" line. Each now has a test. All 48 remaining mutants are caught, and the deny-all test also catches the old bug when it is put back.
 
