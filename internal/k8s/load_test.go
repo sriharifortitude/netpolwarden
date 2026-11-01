@@ -79,6 +79,32 @@ func TestNamespacesGetTheirNameLabel(t *testing.T) {
 	}
 }
 
+func TestTheNameLabelCannotBeForged(t *testing.T) {
+	c := read(t, "apiVersion: v1\nkind: Namespace\nmetadata: {name: shop, labels: {kubernetes.io/metadata.name: kube-system}}\n")
+	if c.Namespaces["shop"].Labels[NameLabel] != "shop" {
+		t.Fatalf("the API server sets the name label to the real name: %v", c.Namespaces["shop"].Labels)
+	}
+	if len(c.Problems) != 1 || !strings.Contains(c.Problems[0], "replaces it") {
+		t.Fatalf("%v", c.Problems)
+	}
+}
+
+func TestANullSectionIsAbsent(t *testing.T) {
+	c := read(t, `
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: a}
+spec:
+  podSelector: {}
+  egress: null
+  ingress: ~
+`)
+	p := c.Policies[0]
+	if p.EgressType || !p.IngressType || p.Egress != nil || p.Ingress != nil {
+		t.Fatalf("egress: null is no egress section, so the policy is ingress-only: %+v", p)
+	}
+}
+
 func TestPolicyTypesAndRuleShapes(t *testing.T) {
 	c := read(t, `
 apiVersion: networking.k8s.io/v1

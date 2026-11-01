@@ -216,6 +216,14 @@ func (c *Cluster) node(name string, node *yaml.Node, defaultNS string) {
 		for k, v := range doc.Metadata.Labels {
 			n.Labels[k] = v
 		}
+		// The API server always sets this label to the namespace's own name, whatever a
+		// manifest says, so a manifest cannot make one namespace look like another to a
+		// namespaceSelector.
+		if v, ok := doc.Metadata.Labels[NameLabel]; ok && v != doc.Metadata.Name {
+			c.Problems = append(c.Problems, fmt.Sprintf("%s: Namespace %s sets %s=%s; the API server replaces it with the namespace's name",
+				where, doc.Metadata.Name, NameLabel, v))
+		}
+		n.Labels[NameLabel] = doc.Metadata.Name
 	case "Pod":
 		var spec podSpec
 		_ = doc.Spec.Decode(&spec)
@@ -293,7 +301,7 @@ func (c *Cluster) policy(doc document, ns, where string) {
 	if len(spec.PolicyTypes) == 0 {
 		// The API's default: Ingress, plus Egress if the policy has an egress section.
 		p.IngressType = true
-		p.EgressType = spec.Egress.Kind != 0
+		p.EgressType = present(&spec.Egress)
 	}
 	for _, t := range spec.PolicyTypes {
 		switch t {
@@ -309,8 +317,14 @@ func (c *Cluster) policy(doc document, ns, where string) {
 	c.Policies = append(c.Policies, p)
 }
 
+// present reports a YAML field that is set to something other than null. The API treats
+// "egress: null" (or "~") as no egress section at all.
+func present(n *yaml.Node) bool {
+	return n.Kind != 0 && !(n.Kind == yaml.ScalarNode && n.Tag == "!!null")
+}
+
 func rules(n *yaml.Node) ([]Rule, error) {
-	if n.Kind == 0 {
+	if !present(n) {
 		return nil, nil
 	}
 	var out []Rule

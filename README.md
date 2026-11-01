@@ -95,7 +95,7 @@ whether pod addresses inside its range match.
 ## Tested
 
 ```bash
-go test ./...                       # 31 tests and a fuzz target
+go test ./...                       # 33 tests and a fuzz target
 ./scripts/differential.sh           # against Calico on a kind cluster; needs docker, kind, kubectl
 ```
 
