@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: vet, staticcheck, race tests, the README's demo
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go install honnef.co/go/tools/cmd/staticcheck@latest && staticcheck ./...
+      - run: go test -race -count=1 ./...
+      - run: go build -o bin/netpolwarden ./cmd/netpolwarden
+      - name: the README's demo must be what the binary prints
+        run: ./scripts/check-readme.sh
+
+  differential:
+    name: agree with Calico on a real cluster
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - run: go build -o bin/netpolwarden ./cmd/netpolwarden
+      - run: go install sigs.k8s.io/kind@v0.24.0
+      - run: ./scripts/differential.sh
+
+  fuzz:
+    name: fuzz the manifest reader for 60 seconds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - run: go test -run '^$' -fuzz '^FuzzRead$' -fuzztime 60s ./internal/k8s
+
+  secrets:
+    name: credsweep over the full commit history
+    runs-on: ubuntu-latest
+    steps:
+      # A shallow clone would let credsweep report a false all-clear.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - run: go install github.com/sriharifortitude/credsweep/cmd/credsweep@v0.1.4
+      - run: credsweep scan .

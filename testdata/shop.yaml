@@ -1,0 +1,189 @@
+# An invented shop: an ingress controller, three tiers, a batch worker, monitoring, and a
+# legacy namespace nobody has written policies for. The mistakes are the common ones.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shop
+  labels: {team: shop}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels: {team: platform}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ingress-nginx
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: legacy
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: controller, namespace: ingress-nginx}
+spec:
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: ingress-nginx}
+    spec:
+      containers:
+        - name: controller
+          ports: [{name: http, containerPort: 80}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: frontend, namespace: shop}
+spec:
+  template:
+    metadata:
+      labels: {app: frontend}
+    spec:
+      containers:
+        - name: web
+          ports: [{name: http, containerPort: 8080}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: api, namespace: shop}
+spec:
+  template:
+    metadata:
+      labels: {app: api}
+    spec:
+      containers:
+        - name: api
+          ports:
+            - {name: http, containerPort: 9000}
+            - {name: prom, containerPort: 9100}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: db, namespace: shop}
+spec:
+  template:
+    metadata:
+      labels: {app: db}
+    spec:
+      containers:
+        - name: postgres
+          ports: [{name: postgres, containerPort: 5432}]
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata: {name: payments-sync, namespace: shop}
+spec:
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels: {app: payments}
+        spec:
+          containers:
+            - name: sync
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: prometheus, namespace: monitoring}
+spec:
+  template:
+    metadata:
+      labels: {app: prometheus}
+    spec:
+      containers:
+        - name: prometheus
+          ports: [{name: web, containerPort: 9090}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: reports, namespace: legacy}
+spec:
+  template:
+    metadata:
+      labels: {app: reports}
+    spec:
+      containers:
+        - name: reports
+          ports: [{name: http, containerPort: 8080}]
+---
+# Every pod in shop is closed to ingress unless something below opens it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: default-deny-ingress, namespace: shop}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: frontend-from-ingress, namespace: shop}
+spec:
+  podSelector:
+    matchLabels: {app: frontend}
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: ingress-nginx}
+      ports: [{port: http}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: api-from-frontend, namespace: shop}
+spec:
+  podSelector:
+    matchLabels: {app: api}
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app: frontend}
+      ports: [{port: 9000}]
+    # Meant: Prometheus, from the monitoring namespace. Written as two list items, it admits
+    # every pod in monitoring OR anything labelled app=prometheus in shop.
+    - from:
+        - namespaceSelector:
+            matchLabels: {team: platform}
+        - podSelector:
+            matchLabels: {app: prometheus}
+      ports: [{port: metrics}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: db-from-api, namespace: shop}
+spec:
+  podSelector:
+    matchLabels: {app: db}
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app: api}
+      ports: [{port: 5432}]
+---
+# Meant for the payments job; the label is misspelt, so it selects nothing.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: payments-egress, namespace: shop}
+spec:
+  podSelector:
+    matchLabels: {app: paymnets}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock: {cidr: 203.0.113.0/24}
+      ports: [{port: 443}]
+---
+# Locks the database's outbound traffic down, and with it, DNS.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: db-egress, namespace: shop}
+spec:
+  podSelector:
+    matchLabels: {app: db}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: {app: db}
+      ports: [{port: 5432}]
