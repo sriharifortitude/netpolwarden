@@ -318,9 +318,12 @@ func (c *Cluster) policy(doc document, ns, where string) {
 }
 
 // present reports a YAML field that is set to something other than null. The API treats
-// "egress: null" (or "~") as no egress section at all.
+// "egress: null" (or "~", or an alias of a null) as no egress section at all.
 func present(n *yaml.Node) bool {
-	return n.Kind != 0 && !(n.Kind == yaml.ScalarNode && n.Tag == "!!null")
+	for i := 0; n != nil && n.Kind == yaml.AliasNode && i < 16; i++ {
+		n = n.Alias
+	}
+	return n != nil && n.Kind != 0 && n.Kind != yaml.AliasNode && !(n.Kind == yaml.ScalarNode && n.ShortTag() == "!!null")
 }
 
 func rules(n *yaml.Node) ([]Rule, error) {

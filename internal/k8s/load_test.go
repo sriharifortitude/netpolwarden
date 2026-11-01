@@ -103,6 +103,15 @@ spec:
 	if p.EgressType || !p.IngressType || p.Egress != nil || p.Ingress != nil {
 		t.Fatalf("egress: null is no egress section, so the policy is ingress-only: %+v", p)
 	}
+	// An alias of a null is a null too.
+	c = read(t, "x: &nothing null\n---\napiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata: {name: b}\nspec:\n  podSelector: {}\n  egress: *nothing\n")
+	if len(c.Policies) == 1 && c.Policies[0].EgressType {
+		t.Fatalf("an aliased null egress section is absent: %+v", c.Policies[0])
+	}
+	c = read(t, "apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata: {name: c}\nspec:\n  podSelector: {}\n  extra: &nothing null\n  egress: *nothing\n")
+	if len(c.Policies) != 1 || c.Policies[0].EgressType {
+		t.Fatalf("an aliased null egress section is absent: %+v %v", c.Policies, c.Problems)
+	}
 }
 
 func TestPolicyTypesAndRuleShapes(t *testing.T) {
